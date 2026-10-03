@@ -1,342 +1,1516 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SPS - 同步影厅 (NAS/VPS 部署版)</title>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #eee; margin: 0; padding: 15px; }
-    
-    .layout { display: grid; grid-template-columns: 1fr 320px; gap: 15px; max-width: 1200px; margin: 0 auto; }
-    @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Syncplay Web</title>
 
-    .panel { background: #1e1e1e; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
-    .inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
-    input, button, select { padding: 8px; background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 4px; font-size: 13px; }
-    button { background: #0070f3; border: none; cursor: pointer; font-weight: bold; color: #fff; }
-    button:hover { background: #0051a8; }
-    
-    .stage { position: relative; width: 100%; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; }
-    video { width: 100%; height: 100%; }
-    .danmaku-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
-    .danmaku { position: absolute; white-space: nowrap; font-weight: bold; font-size: 18px; color: #fff; text-shadow: 1px 1px 2px #000; animation: moveDanmaku 6s linear forwards; }
-    @keyframes moveDanmaku {
-      from { transform: translateX(100%); }
-      to { transform: translateX(-100%); }
-    }
+<style>
+* {
+    box-sizing: border-box;
+}
 
-    .chat-panel { background: #1e1e1e; border-radius: 8px; display: flex; flex-direction: column; height: 100%; max-height: 580px; }
-    .chat-box { flex: 1; padding: 10px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
-    .chat-item { background: #2a2a2a; padding: 6px 10px; border-radius: 4px; word-break: break-all; }
-    .chat-user { color: #0070f3; font-weight: bold; margin-right: 5px; }
-    .chat-input { display: flex; padding: 10px; gap: 5px; border-top: 1px solid #333; }
+body {
+    margin: 0;
+    background: #111;
+    color: #ddd;
+    font-family: system-ui, sans-serif;
+}
 
-    .tag { display: inline-block; padding: 2px 6px; font-size: 10px; border-radius: 3px; margin-left: 5px; }
-    .tag-host { background: #e53e3e; }
-    .tag-local { background: #dd6b20; }
-    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #aaa; margin-right: 5px; }
-    .status-online { background: #48bb78; }
-  </style>
+.app {
+    max-width: 1200px;
+    margin: auto;
+    padding: 20px;
+}
+
+h1 {
+    margin-top: 0;
+}
+
+.panel {
+    background: #1b1b1b;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+input {
+    background: #222;
+    border: 1px solid #444;
+    color: white;
+    padding: 9px;
+    border-radius: 5px;
+}
+
+input[type="text"],
+input[type="password"] {
+    flex: 1;
+    min-width: 160px;
+}
+
+button {
+    background: #333;
+    border: 1px solid #555;
+    color: white;
+    padding: 9px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #444;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+video {
+    display: block;
+    width: 100%;
+    max-height: 70vh;
+    background: black;
+    border-radius: 6px;
+}
+
+.status {
+    font-family: monospace;
+    color: #aaa;
+}
+
+.columns {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 15px;
+}
+
+.users {
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.chat {
+    height: 180px;
+    overflow-y: auto;
+    background: #111;
+    padding: 10px;
+    font-family: monospace;
+    border-radius: 5px;
+}
+
+.chat-input {
+    display: flex;
+    margin-top: 8px;
+}
+
+.chat-input input {
+    flex: 1;
+}
+
+.log {
+    height: 120px;
+    overflow-y: auto;
+    background: #111;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+</style>
+
 </head>
+
 <body>
 
-<div class="layout">
-  <div>
-    <!-- 服务器与连接配置 -->
-    <div class="panel">
-      <div style="font-size: 12px; color: #888; margin-bottom: 6px;">服务器配置</div>
-      <div class="inputs" style="grid-template-columns: 1fr auto;">
-        <input type="text" id="serverAddress" placeholder="如 wss://sync.yourdomain.com 或 ws://192.168.1.100:3000">
-        <button onclick="saveServerAddress()">保存配置</button>
-      </div>
-    </div>
+<div class="app">
 
-    <!-- 房间配置 -->
-    <div class="panel">
-      <div class="inputs">
-        <input type="text" id="room" value="101" placeholder="房间号">
-        <input type="password" id="pass" placeholder="密码 (选填)">
-        <input type="text" id="user" value="UserA" placeholder="昵称">
-        <button onclick="connectRoom()">进入房间</button>
-      </div>
+<h1>Syncplay Web</h1>
 
-      <div class="inputs" style="margin-top: 8px;">
-        <select id="sourceType" onchange="toggleSourceType()">
-          <option value="m3u8">M3U8 网络源 (同步)</option>
-          <option value="local">本地文件 (仅本地，不同步)</option>
-        </select>
-        
-        <input type="text" id="m3u8Url" placeholder="M3U8 播放链接..." style="grid-column: span 2;">
-        <input type="file" id="localFile" accept="video/*" style="display:none;" onchange="loadLocalFile(this)">
-        <button id="btnUpdateUrl" onclick="submitUrlChange()">应用/广播新源</button>
-      </div>
-    </div>
+<div class="panel">
 
-    <div class="stage">
-      <video id="video" controls></video>
-      <div class="danmaku-layer" id="danmakuLayer"></div>
-    </div>
-  </div>
+<div class="row">
+    <input id="server"
+           type="text"
+           value="wss://your-worker.example.workers.dev"
+           placeholder="WSS / WS 地址">
+</div>
 
-  <div class="chat-panel">
-    <div style="padding: 10px; border-bottom: 1px solid #333; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-      <div>
-        <span id="statusDot" class="status-dot"></span>
-        <span>弹幕聊天室</span>
-      </div>
-      <span id="roleBadge"></span>
-    </div>
-    <div class="chat-box" id="chatBox"></div>
-    <div class="chat-input">
-      <input type="text" id="chatMsg" placeholder="发弹幕..." style="flex:1;" onkeydown="if(event.key==='Enter') sendChat()">
-      <button onclick="sendChat()">发送</button>
-    </div>
-  </div>
+<div class="row">
+    <input id="room"
+           type="text"
+           placeholder="房间名">
+
+```
+<input id="password"
+       type="password"
+       placeholder="房间密码">
+
+<input id="username"
+       type="text"
+       placeholder="用户名">
+```
+
+</div>
+
+<div class="row">
+    <button id="connectBtn">连接</button>
+    <button id="disconnectBtn" disabled>断开</button>
+
+```
+<label>
+    <input id="fileInput" type="file" accept="video/*">
+</label>
+```
+
+</div>
+
+<div class="status" id="status">
+    未连接
+</div>
+
+</div>
+
+<div class="columns">
+
+<div>
+
+<div class="panel">
+    <video id="video" controls></video>
+</div>
+
+<div class="panel">
+
+<h3>聊天</h3>
+
+<div id="chat" class="chat"></div>
+
+<div class="chat-input">
+    <input id="chatInput" type="text" placeholder="输入消息">
+    <button id="chatSend">发送</button>
+</div>
+
+</div>
+
+<div class="panel">
+
+<h3>Debug</h3>
+
+<div id="log" class="log"></div>
+
+</div>
+
+</div>
+
+<div>
+
+<div class="panel">
+
+<h3>房间用户</h3>
+
+<div id="users" class="users">
+暂无
+</div>
+
+</div>
+
+</div>
+
+</div>
+
 </div>
 
 <script>
-  let hls, ws;
-  let isHost = false;
-  let isLocalMode = false;
-  let isRemoteAction = false;
-  let currentLoadedUrl = '';
 
-  const video = document.getElementById('video');
+"use strict";
 
-  // 初始化服务器地址策略：优先使用 localStorage，其次获取当前页面 Host
-  window.onload = () => {
-    const savedServer = localStorage.getItem('sps_server_address');
-    if (savedServer) {
-      document.getElementById('serverAddress').value = savedServer;
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      document.getElementById('serverAddress').value = `${protocol}//${window.location.host}`;
+
+/* ============================================================
+ * 基础状态
+ * ============================================================
+ */
+
+const state = {
+
+    ws: null,
+
+    connected: false,
+    logged: false,
+
+    username: "",
+    room: "",
+
+    serverVersion: null,
+
+    currentFile: null,
+
+    users: {},
+
+    ignoreLocalEvents: false,
+
+    clientIgnore: 0,
+    serverIgnore: 0,
+
+    lastServerLatencyCalculation: null,
+
+    pingTimer: null,
+
+    reconnectTimer: null
+};
+
+
+const video = document.getElementById("video");
+const serverInput = document.getElementById("server");
+const roomInput = document.getElementById("room");
+const passwordInput = document.getElementById("password");
+const usernameInput = document.getElementById("username");
+
+const connectBtn = document.getElementById("connectBtn");
+const disconnectBtn = document.getElementById("disconnectBtn");
+
+const fileInput = document.getElementById("fileInput");
+
+const statusElement = document.getElementById("status");
+const usersElement = document.getElementById("users");
+const chatElement = document.getElementById("chat");
+const chatInput = document.getElementById("chatInput");
+const chatSend = document.getElementById("chatSend");
+const logElement = document.getElementById("log");
+
+
+/* ============================================================
+ * 工具
+ * ============================================================
+ */
+
+function randomUsername() {
+
+    const chars =
+        "abcdefghijklmnopqrstuvwxyz0123456789";
+
+    let result = "Web-";
+
+    for (let i = 0; i < 6; i++) {
+        result += chars[
+            Math.floor(Math.random() * chars.length)
+        ];
     }
-  };
 
-  function saveServerAddress() {
-    const addr = document.getElementById('serverAddress').value.trim();
-    if (addr) {
-      localStorage.setItem('sps_server_address', addr);
-      alert('服务器地址已保存！');
+    return result;
+}
+
+
+function log(message) {
+
+    const time = new Date().toLocaleTimeString();
+
+    logElement.textContent +=
+        `[${time}] ${message}\n`;
+
+    logElement.scrollTop =
+        logElement.scrollHeight;
+}
+
+
+function setStatus(message) {
+
+    statusElement.textContent = message;
+
+    log(message);
+}
+
+
+function send(message) {
+
+    if (!state.ws ||
+        state.ws.readyState !== WebSocket.OPEN) {
+
+        return false;
     }
-  }
 
-  function getWsAddress() {
-    let addr = document.getElementById('serverAddress').value.trim();
-    if (!addr.startsWith('ws://') && !addr.startsWith('wss://')) {
-      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-      addr = protocol + addr;
+    const line =
+        JSON.stringify(message) + "\n";
+
+    state.ws.send(line);
+
+    log(">> " + JSON.stringify(message));
+
+    return true;
+}
+
+
+/* ============================================================
+ * 初始化用户名
+ * ============================================================
+ */
+
+if (!usernameInput.value) {
+
+    usernameInput.value =
+        randomUsername();
+}
+
+
+/* ============================================================
+ * WebSocket
+ * ============================================================
+ */
+
+function connect() {
+
+    if (state.ws) {
+        try {
+            state.ws.close();
+        } catch {}
     }
-    return addr;
-  }
 
-  function toggleSourceType() {
-    const type = document.getElementById('sourceType').value;
-    const urlInput = document.getElementById('m3u8Url');
-    const fileInput = document.getElementById('localFile');
+    const url =
+        serverInput.value.trim();
 
-    if (type === 'local') {
-      isLocalMode = true;
-      urlInput.style.display = 'none';
-      fileInput.style.display = 'block';
-      appendSystemChat('已切至本地文件模式：进度不同步，聊天保持连通。');
-      document.getElementById('roleBadge').innerHTML = '<span class="tag tag-local">本地单播</span>';
-    } else {
-      isLocalMode = false;
-      urlInput.style.display = 'block';
-      fileInput.style.display = 'none';
-      appendSystemChat('已切至 M3U8 同步模式。');
+    const room =
+        roomInput.value.trim();
+
+    if (!url) {
+        alert("请输入 WebSocket 地址");
+        return;
     }
-  }
 
-  function loadLocalFile(input) {
-    const file = input.files[0];
-    if (file) {
-      if (hls) hls.destroy();
-      currentLoadedUrl = '';
-      video.src = URL.createObjectURL(file);
-      appendSystemChat(`本地文件: ${file.name}`);
+    if (!room) {
+        alert("请输入房间名");
+        return;
     }
-  }
 
-  function connectRoom() {
-    const wsUrl = getWsAddress();
-    const room = document.getElementById('room').value;
-    const pass = document.getElementById('pass').value;
-    const user = document.getElementById('user').value;
+    state.username =
+        usernameInput.value.trim() ||
+        randomUsername();
 
-    if (ws) ws.close();
-    
+    usernameInput.value =
+        state.username;
+
+    state.room = room;
+
+    setStatus("正在连接 " + url);
+
+    let ws;
+
     try {
-      ws = new WebSocket(wsUrl);
+        ws = new WebSocket(url);
+
+        /*
+         * 非常重要：
+         *
+         * Worker TCP -> WS 使用原始 bytes。
+         * 浏览器因此收到 ArrayBuffer。
+         */
+        ws.binaryType = "arraybuffer";
+
     } catch (e) {
-      alert('WebSocket 地址配置格式错误！');
-      return;
+
+        setStatus("WebSocket 创建失败: " + e);
+        return;
     }
 
-    ws.onopen = () => {
-      document.getElementById('statusDot').classList.add('status-online');
-      ws.send(JSON.stringify({
-        type: 'join',
-        room, pass, user,
-        m3u8Url: document.getElementById('m3u8Url').value,
-        duration: video.duration || 0
-      }));
-    };
+    state.ws = ws;
 
-    ws.onclose = () => {
-      document.getElementById('statusDot').classList.remove('status-online');
-    };
+    connectBtn.disabled = true;
+    disconnectBtn.disabled = false;
 
-    ws.onerror = () => {
-      appendSystemChat('连接服务器失败，请检查服务器地址是否正确及可访问。');
-    };
 
-    ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
+    ws.addEventListener("open", () => {
 
-      if (data.type === 'joined') {
-        isHost = data.isHost;
-        updateRoleBadge();
-        
-        if (data.m3u8Url && !isLocalMode) {
-          document.getElementById('m3u8Url').value = data.m3u8Url;
-          loadHls(data.m3u8Url);
-        }
-        syncVideoState(data.state.time, data.state.paused);
-        startHeartbeat();
-      }
+        state.connected = true;
 
-      if (data.type === 'host_transfer') {
-        isHost = true;
-        updateRoleBadge();
-        appendSystemChat('原房主离开，你已自动成为房主！');
-      }
+        setStatus("WebSocket 已连接，发送 Hello");
 
-      if (data.type === 'url_changed' && !isLocalMode) {
-        appendSystemChat(`${data.by} 更换了播放源`);
-        document.getElementById('m3u8Url').value = data.url;
-        loadHls(data.url);
-      }
+        sendHello();
 
-      if (data.type === 'sync' && !isLocalMode) {
-        const diff = Math.abs(video.currentTime - data.time);
-        if (diff > 1.8) syncVideoState(data.time, data.paused);
-      }
+        startPing();
 
-      if (data.type === 'action' && !isLocalMode) {
-        if (data.action === 'play') syncVideoState(data.time, false);
-        if (data.action === 'pause') syncVideoState(data.time, true);
-        if (data.action === 'seek') syncVideoState(data.time, video.paused);
-      }
-
-      if (data.type === 'chat') {
-        appendChat(data.user, data.text);
-        renderDanmaku(data.text);
-      }
-
-      if (data.type === 'error') alert(data.message);
-    };
-  }
-
-  function submitUrlChange() {
-    const url = document.getElementById('m3u8Url').value;
-    if (isLocalMode || !url) return;
-
-    loadHls(url);
-
-    const handleMetadata = () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'change_url',
-          url: url,
-          duration: video.duration
-        }));
-      }
-      video.removeEventListener('loadedmetadata', handleMetadata);
-    };
-
-    video.addEventListener('loadedmetadata', handleMetadata);
-  }
-
-  function loadHls(url) {
-    if (!url || url === currentLoadedUrl) return;
-    currentLoadedUrl = url;
-
-    if (Hls.isSupported()) {
-      if (hls) hls.destroy();
-      hls = new Hls();
-      hls.loadSource(url);
-      hls.attachMedia(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
-    }
-  }
-
-  function syncVideoState(time, paused) {
-    if (isLocalMode) return;
-    isRemoteAction = true;
-    if (Math.abs(video.currentTime - time) > 0.5) video.currentTime = time;
-    if (paused && !video.paused) video.pause();
-    if (!paused && video.paused) video.play().catch(()=>{});
-    setTimeout(() => isRemoteAction = false, 300);
-  }
-
-  function startHeartbeat() {
-    setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN && !isLocalMode) {
-        ws.send(JSON.stringify({ type: 'sync', time: video.currentTime, clientTime: Date.now() }));
-      }
-    }, 3000);
-  }
-
-  ['play', 'pause', 'seeking'].forEach(evt => {
-    video.addEventListener(evt, () => {
-      if (isRemoteAction || isLocalMode || !ws || ws.readyState !== WebSocket.OPEN) return;
-      const action = evt === 'seeking' ? 'seek' : evt;
-      ws.send(JSON.stringify({ type: 'action', action, time: video.currentTime }));
     });
-  });
 
-  function sendChat() {
-    const input = document.getElementById('chatMsg');
-    const text = input.value.trim();
-    if (!text || !ws) return;
-    ws.send(JSON.stringify({ type: 'chat', text }));
-    input.value = '';
-  }
 
-  function appendChat(user, text) {
-    const box = document.getElementById('chatBox');
-    const div = document.createElement('div');
-    div.className = 'chat-item';
-    div.innerHTML = `<span class="chat-user">${user}:</span> ${text}`;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-  }
+    ws.addEventListener("message", event => {
 
-  function appendSystemChat(text) {
-    appendChat('系统', text);
-  }
+        handleIncomingData(event.data);
 
-  function renderDanmaku(text) {
-    const layer = document.getElementById('danmakuLayer');
-    const el = document.createElement('div');
-    el.className = 'danmaku';
-    el.innerText = text;
-    const top = Math.floor(Math.random() * 70) + 10;
-    el.style.top = top + '%';
-    layer.appendChild(el);
-    setTimeout(() => el.remove(), 6000);
-  }
+    });
 
-  function updateRoleBadge() {
-    const badge = document.getElementById('roleBadge');
-    badge.innerHTML = isHost ? '<span class="tag tag-host">房主</span>' : '<span class="tag">成员</span>';
-  }
+
+    ws.addEventListener("error", event => {
+
+        console.error(event);
+
+        setStatus("WebSocket 错误");
+
+    });
+
+
+    ws.addEventListener("close", event => {
+
+        state.connected = false;
+        state.logged = false;
+
+        stopPing();
+
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+
+        setStatus(
+            `连接关闭 code=${event.code} reason=${event.reason || ""}`
+        );
+
+    });
+}
+
+
+function disconnect() {
+
+    stopPing();
+
+    if (state.ws) {
+
+        try {
+            state.ws.close();
+        } catch {}
+
+    }
+
+    state.ws = null;
+    state.connected = false;
+    state.logged = false;
+
+    connectBtn.disabled = false;
+    disconnectBtn.disabled = true;
+
+    setStatus("已断开");
+}
+
+
+/* ============================================================
+ * TCP-like line parser
+ *
+ * Syncplay:
+ *
+ * {"Hello": ...}\n
+ * {"State": ...}\n
+ *
+ * WebSocket 自己有 message boundary，
+ * 但 Worker 转发的是 TCP chunks，
+ * 所以仍然必须自己处理换行。
+ * ============================================================
+ */
+
+const decoder =
+    new TextDecoder("utf-8");
+
+let receiveBuffer = "";
+
+
+function handleIncomingData(data) {
+
+    let text;
+
+    if (typeof data === "string") {
+
+        text = data;
+
+    } else if (data instanceof ArrayBuffer) {
+
+        text = decoder.decode(
+            new Uint8Array(data),
+            { stream: true }
+        );
+
+    } else if (data instanceof Blob) {
+
+        data.arrayBuffer().then(buffer => {
+            handleIncomingData(buffer);
+        });
+
+        return;
+
+    } else {
+
+        console.warn(
+            "Unknown websocket data type",
+            data
+        );
+
+        return;
+    }
+
+
+    receiveBuffer += text;
+
+    while (true) {
+
+        const index =
+            receiveBuffer.indexOf("\n");
+
+        if (index < 0)
+            break;
+
+        const line =
+            receiveBuffer.slice(0, index).trim();
+
+        receiveBuffer =
+            receiveBuffer.slice(index + 1);
+
+        if (!line)
+            continue;
+
+        try {
+
+            const message =
+                JSON.parse(line);
+
+            log("<< " + line);
+
+            handleSyncplayMessage(message);
+
+        } catch (e) {
+
+            console.error(
+                "Invalid Syncplay JSON:",
+                line,
+                e
+            );
+
+        }
+    }
+}
+
+
+/* ============================================================
+ * Syncplay Hello
+ * ============================================================
+ */
+
+function sendHello() {
+
+    const password =
+        passwordInput.value;
+
+    const hello = {
+
+        username:
+            state.username,
+
+        room: {
+            name:
+                state.room
+        },
+
+        /*
+         * 1.2.255 是 Syncplay 官方协议中
+         * 用于兼容新服务器的客户端协议版本。
+         */
+        version: "1.2.255",
+
+        /*
+         * realversion 可以给一个自己的 web client
+         * 版本。
+         */
+        realversion: "web-0.1.0",
+
+        /*
+         * 最小 features。
+         *
+         * 不宣称支持 playlist/controller 等高级功能。
+         */
+        features: {}
+
+    };
+
+    if (password) {
+        hello.password = password;
+    }
+
+    send({
+        Hello: hello
+    });
+}
+
+
+/* ============================================================
+ * 收到 Syncplay 消息
+ * ============================================================
+ */
+
+function handleSyncplayMessage(message) {
+
+    if (message.Hello !== undefined) {
+
+        handleHello(message.Hello);
+
+    } else if (message.Error !== undefined) {
+
+        handleError(message.Error);
+
+    } else if (message.State !== undefined) {
+
+        handleState(message.State);
+
+    } else if (message.List !== undefined) {
+
+        handleList(message.List);
+
+    } else if (message.Set !== undefined) {
+
+        handleSet(message.Set);
+
+    } else if (message.Chat !== undefined) {
+
+        handleChat(message.Chat);
+
+    } else {
+
+        log(
+            "未知 Syncplay 消息: " +
+            JSON.stringify(message)
+        );
+    }
+}
+
+
+/* ============================================================
+ * Server Hello
+ * ============================================================
+ */
+
+function handleHello(hello) {
+
+    state.logged = true;
+
+    state.serverVersion =
+        hello.version || null;
+
+    if (hello.username) {
+
+        /*
+         * 服务器可能因为用户名重复而修改用户名。
+         */
+        state.username =
+            hello.username;
+
+        usernameInput.value =
+            hello.username;
+    }
+
+    if (hello.room &&
+        hello.room.name) {
+
+        state.room =
+            hello.room.name;
+
+        roomInput.value =
+            hello.room.name;
+    }
+
+    setStatus(
+        `已进入房间：${state.room}`
+    );
+
+    if (hello.motd) {
+
+        addChatMessage(
+            "Server",
+            hello.motd
+        );
+    }
+
+    /*
+     * 官方客户端收到 Hello 后会发送自己的文件信息。
+     * 如果目前没有文件，则发送空文件。
+     */
+    sendCurrentFile();
+
+    /*
+     * 请求用户列表。
+     */
+    send({
+        List: null
+    });
+}
+
+
+/* ============================================================
+ * Error
+ * ============================================================
+ */
+
+function handleError(error) {
+
+    const message =
+        error?.message || "Unknown error";
+
+    setStatus(
+        "Syncplay 错误：" + message
+    );
+
+    addChatMessage(
+        "Server",
+        message
+    );
+}
+
+
+/* ============================================================
+ * File
+ * ============================================================
+ */
+
+fileInput.addEventListener(
+    "change",
+    () => {
+
+        const file =
+            fileInput.files[0];
+
+        if (!file)
+            return;
+
+        const url =
+            URL.createObjectURL(file);
+
+        state.currentFile = file;
+
+        video.src = url;
+        video.load();
+
+        /*
+         * metadata 加载之后才能知道 duration。
+         */
+        video.addEventListener(
+            "loadedmetadata",
+            () => {
+
+                sendCurrentFile();
+
+            },
+            { once: true }
+        );
+    }
+);
+
+
+function sendCurrentFile() {
+
+    if (!state.logged)
+        return;
+
+    const file =
+        state.currentFile;
+
+    if (!file) {
+
+        send({
+            Set: {
+                file: {}
+            }
+        });
+
+        send({
+            List: null
+        });
+
+        return;
+    }
+
+    const fileInfo = {
+
+        name:
+            file.name,
+
+        size:
+            file.size,
+
+        duration:
+            Number.isFinite(video.duration)
+                ? video.duration
+                : 0
+    };
+
+
+    send({
+        Set: {
+            file: fileInfo
+        }
+    });
+
+    send({
+        List: null
+    });
+}
+
+
+/* ============================================================
+ * 用户列表
+ * ============================================================
+ */
+
+function handleList(list) {
+
+    state.users = {};
+
+    for (const roomName of Object.keys(list)) {
+
+        const room =
+            list[roomName];
+
+        for (const username of Object.keys(room)) {
+
+            state.users[username] = {
+
+                room:
+                    roomName,
+
+                ...room[username]
+
+            };
+        }
+    }
+
+    renderUsers();
+}
+
+
+function renderUsers() {
+
+    const names =
+        Object.keys(state.users);
+
+    if (!names.length) {
+
+        usersElement.textContent =
+            "暂无";
+
+        return;
+    }
+
+    let output = "";
+
+    for (const name of names) {
+
+        const user =
+            state.users[name];
+
+        const file =
+            user.file || {};
+
+        output +=
+            `${name}\n`;
+
+        if (file.name) {
+
+            output +=
+                `  ${file.name}\n`;
+
+        } else {
+
+            output +=
+                `  [没有文件]\n`;
+        }
+
+        output += "\n";
+    }
+
+    usersElement.textContent =
+        output;
+}
+
+
+/* ============================================================
+ * Set
+ * ============================================================
+ */
+
+function handleSet(settings) {
+
+    /*
+     * 用户加入 / 离开
+     */
+    if (settings.user) {
+
+        for (const username of Object.keys(
+            settings.user
+        )) {
+
+            const user =
+                settings.user[username];
+
+            if (user.event?.left) {
+
+                delete state.users[username];
+
+            } else {
+
+                const old =
+                    state.users[username] || {};
+
+                state.users[username] = {
+                    ...old,
+                    ...user
+                };
+            }
+        }
+
+        renderUsers();
+    }
+
+
+    /*
+     * 房间发生变化
+     */
+    if (settings.room) {
+
+        if (settings.room.name) {
+
+            state.room =
+                settings.room.name;
+
+            roomInput.value =
+                state.room;
+        }
+    }
+}
+
+
+/* ============================================================
+ * Chat
+ * ============================================================
+ */
+
+function handleChat(message) {
+
+    addChatMessage(
+        message.username || "?",
+        message.message || ""
+    );
+}
+
+
+function addChatMessage(username, message) {
+
+    const div =
+        document.createElement("div");
+
+    div.textContent =
+        `<${username}> ${message}`;
+
+    chatElement.appendChild(div);
+
+    chatElement.scrollTop =
+        chatElement.scrollHeight;
+}
+
+
+function sendChat() {
+
+    const message =
+        chatInput.value.trim();
+
+    if (!message)
+        return;
+
+    if (!state.logged)
+        return;
+
+    send({
+        Chat: {
+            message
+        }
+    });
+
+    chatInput.value = "";
+}
+
+
+chatSend.addEventListener(
+    "click",
+    sendChat
+);
+
+
+chatInput.addEventListener(
+    "keydown",
+    event => {
+
+        if (event.key === "Enter") {
+            sendChat();
+        }
+
+    }
+);
+
+
+/* ============================================================
+ * Playback state
+ * ============================================================
+ */
+
+function getLocalPosition() {
+
+    return Number.isFinite(video.currentTime)
+        ? video.currentTime
+        : 0;
+}
+
+
+function getLocalPaused() {
+
+    return video.paused;
+}
+
+
+function sendPlaybackState(doSeek = false) {
+
+    if (!state.logged)
+        return;
+
+    const stateMessage = {
+
+        playstate: {
+
+            position:
+                getLocalPosition(),
+
+            paused:
+                getLocalPaused()
+
+        },
+
+        ping: {
+
+            clientRtt:
+                0,
+
+            clientLatencyCalculation:
+                Date.now() / 1000
+        }
+
+    };
+
+
+    if (doSeek) {
+
+        stateMessage.playstate.doSeek =
+            true;
+
+        state.clientIgnore++;
+    }
+
+
+    if (state.clientIgnore) {
+
+        stateMessage.ignoringOnTheFly = {
+
+            client:
+                state.clientIgnore
+        };
+    }
+
+
+    if (state.serverIgnore) {
+
+        stateMessage.ignoringOnTheFly = {
+
+            ...(stateMessage.ignoringOnTheFly || {}),
+
+            server:
+                state.serverIgnore
+        };
+
+        state.serverIgnore = 0;
+    }
+
+
+    send({
+        State:
+            stateMessage
+    });
+}
+
+
+/* ============================================================
+ * Local video events
+ * ============================================================
+ */
+
+video.addEventListener(
+    "play",
+    () => {
+
+        if (state.ignoreLocalEvents)
+            return;
+
+        sendPlaybackState(false);
+
+    }
+);
+
+
+video.addEventListener(
+    "pause",
+    () => {
+
+        if (state.ignoreLocalEvents)
+            return;
+
+        sendPlaybackState(false);
+
+    }
+);
+
+
+let seekTimer = null;
+
+video.addEventListener(
+    "seeking",
+    () => {
+
+        if (state.ignoreLocalEvents)
+            return;
+
+        /*
+         * seeking 可能连续触发很多次。
+         */
+        clearTimeout(seekTimer);
+
+        seekTimer = setTimeout(
+            () => {
+
+                sendPlaybackState(true);
+
+            },
+            80
+        );
+
+    }
+);
+
+
+/* ============================================================
+ * 收到服务器 State
+ * ============================================================
+ */
+
+function handleState(message) {
+
+    /*
+     * Syncplay server 的 ping。
+     */
+    if (message.ping) {
+
+        if (
+            message.ping.latencyCalculation
+        ) {
+
+            state.lastServerLatencyCalculation =
+                message.ping.latencyCalculation;
+        }
+
+        /*
+         * 如果服务器返回了 clientLatencyCalculation，
+         * 可以计算近似 RTT。
+         */
+        if (
+            message.ping.clientLatencyCalculation
+        ) {
+
+            const now =
+                Date.now() / 1000;
+
+            const rtt =
+                now -
+                message.ping.clientLatencyCalculation;
+
+            if (rtt >= 0 && rtt < 10) {
+
+                statusElement.textContent =
+                    `已连接 · RTT ${(rtt * 1000).toFixed(0)} ms`;
+            }
+        }
+    }
+
+
+    /*
+     * Syncplay 的 ignoringOnTheFly
+     */
+    if (message.ignoringOnTheFly) {
+
+        const ignore =
+            message.ignoringOnTheFly;
+
+        if (ignore.server !== undefined) {
+
+            state.serverIgnore =
+                ignore.server;
+        }
+
+        if (ignore.client !== undefined) {
+
+            if (
+                ignore.client ===
+                state.clientIgnore
+            ) {
+
+                state.clientIgnore = 0;
+            }
+        }
+    }
+
+
+    if (!message.playstate)
+        return;
+
+
+    const playstate =
+        message.playstate;
+
+    const position =
+        Number(playstate.position) || 0;
+
+    const paused =
+        !!playstate.paused;
+
+    const doSeek =
+        !!playstate.doSeek;
+
+
+    /*
+     * 自己发出的 State 经过服务器广播回来，
+     * 不要再次触发 play/pause -> 无限回声。
+     */
+    if (
+        playstate.setBy &&
+        playstate.setBy === state.username
+    ) {
+
+        return;
+    }
+
+
+    /*
+     * 房间里的其他人控制播放。
+     */
+    applyRemoteState(
+        position,
+        paused,
+        doSeek
+    );
+}
+
+
+/* ============================================================
+ * 应用远端播放状态
+ * ============================================================
+ */
+
+function applyRemoteState(
+    position,
+    paused,
+    doSeek
+) {
+
+    if (!Number.isFinite(position))
+        return;
+
+
+    const current =
+        getLocalPosition();
+
+    const difference =
+        position - current;
+
+
+    /*
+     * 如果差距非常小，就不 seek。
+     *
+     * HTML5 video 的 currentTime 本身存在
+     * 一定程度的误差。
+     */
+    if (
+        doSeek ||
+        Math.abs(difference) > 0.35
+    ) {
+
+        state.ignoreLocalEvents = true;
+
+        try {
+
+            video.currentTime =
+                Math.max(0, position);
+
+        } finally {
+
+            /*
+             * currentTime 设置可能同步触发，
+             * 但 play/pause 是异步的，
+             * 给一点时间防止回声。
+             */
+            setTimeout(
+                () => {
+                    state.ignoreLocalEvents = false;
+                },
+                100
+            );
+        }
+    }
+
+
+    if (paused) {
+
+        if (!video.paused) {
+
+            state.ignoreLocalEvents = true;
+
+            video.pause();
+
+            setTimeout(
+                () => {
+                    state.ignoreLocalEvents = false;
+                },
+                100
+            );
+        }
+
+    } else {
+
+        if (video.paused) {
+
+            state.ignoreLocalEvents = true;
+
+            /*
+             * 浏览器 autoplay policy 可能阻止这里播放。
+             */
+            video.play().catch(
+                () => {
+
+                    addChatMessage(
+                        "System",
+                        "浏览器阻止了自动播放，请手动点击播放。"
+                    );
+
+                }
+            );
+
+            setTimeout(
+                () => {
+                    state.ignoreLocalEvents = false;
+                },
+                100
+            );
+        }
+    }
+}
+
+
+/* ============================================================
+ * Ping
+ *
+ * Syncplay 服务器要求客户端持续发送 State ping。
+ * 官方协议说明中明确提到，即使暂停也需要 ping。
+ * ============================================================
+ */
+
+function startPing() {
+
+    stopPing();
+
+    state.pingTimer =
+        setInterval(
+            () => {
+
+                if (!state.logged)
+                    return;
+
+                sendPlaybackState(false);
+
+            },
+            1000
+        );
+}
+
+
+function stopPing() {
+
+    if (state.pingTimer) {
+
+        clearInterval(
+            state.pingTimer
+        );
+
+        state.pingTimer = null;
+    }
+}
+
+
+/* ============================================================
+ * Buttons
+ * ============================================================
+ */
+
+connectBtn.addEventListener(
+    "click",
+    connect
+);
+
+disconnectBtn.addEventListener(
+    "click",
+    disconnect
+);
+
+
+/* ============================================================
+ * Enter 快捷键
+ * ============================================================
+ */
+
+[
+    serverInput,
+    roomInput,
+    passwordInput,
+    usernameInput
+].forEach(input => {
+
+    input.addEventListener(
+        "keydown",
+        event => {
+
+            if (
+                event.key === "Enter" &&
+                !state.connected
+            ) {
+
+                connect();
+
+            }
+
+        }
+    );
+
+});
+
+
+/* ============================================================
+ * 初始状态
+ * ============================================================
+ */
+
+setStatus(
+    "输入房间后连接"
+);
+
 </script>
 
 </body>
